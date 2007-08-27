@@ -1,0 +1,29 @@
+#!/usr/bin/perl
+
+use Daemon::Generic;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use Sid::Updater;
+
+newdaemon(
+    progname        => 'sid-updater',
+    pidfile         => "$FindBin::Bin/../run/sid-updater.pid",
+    configfile      => "$FindBin::Bin/../conf/sid-updater.conf",
+);
+
+sub gd_preconfig { }
+
+sub gd_run {
+    my $su = Sid::Updater->new(
+        queue => "$FindBin::Bin/../queue",
+        xapian => "$FindBin::Bin/../xapian-db",
+    );
+
+    while(1) {
+            my $changes = $su->wait_for_job(20);
+            if ($changes) {
+                print "Doing flush\n";
+                $su->flush;
+            }
+    }
+}

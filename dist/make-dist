@@ -1,0 +1,120 @@
+#!/usr/bin/perl
+
+use FindBin;
+use File::Find;
+use File::Basename;
+
+use strict;
+use warnings;
+
+my @modules = qw(
+Log::Log4perl::Appender::Screen
+Params::ValidatePP
+Time::HiRes
+Sid::Plugin::Script
+Data::UUID
+Sid::Role::Log4perl
+Net::IPv4Addr
+);
+my @so_files;
+my @lib_dirs;
+find({
+    wanted => \&find_dot_so, 
+    follow => 1,
+    }, @INC);
+
+my $pp = `which pp`;
+chomp($pp);
+die "Must have pp!" unless -f $pp;
+
+my $ld_library_path = "/usr/lib:/usr/local/lib";
+my @ppcommand = ($pp);
+foreach my $lib (@lib_dirs) {
+    $ld_library_path .= ":$lib";
+}
+$ENV{'LD_LIBRARY_PATH'} = $ld_library_path;
+$ENV{'PERL5LIB'} .= ":$FindBin::Bin/../lib";
+
+foreach my $so (@so_files) {
+    push(@ppcommand, "-l", "$so");
+}
+
+foreach my $module (@modules) {
+    push(@ppcommand, "-M", $module);
+}
+push(@ppcommand, "-I", "$FindBin::Bin/../lib");
+my @sidcommand = @ppcommand;
+push(@sidcommand, "-o", "$FindBin::Bin/dist/bin/sid", "-c", "$FindBin::Bin/../bin/sid-agent", "-c", "$FindBin::Bin/../bin/sidq", "$FindBin::Bin/../bin/sid-schema");
+
+_mkdir("$FindBin::Bin/dist/bin");
+_mkdir("$FindBin::Bin/dist/tmp");
+_mkdir("$FindBin::Bin/dist/run");
+
+print "Creating PAR file for sid\n";
+system(@sidcommand) == 0 or die "pp command failed: $?";
+foreach my $link ("sid-agent", "sidq", "sid-schema") {
+    _link("$FindBin::Bin/dist/bin/sid", "$FindBin::Bin/dist/bin/$link");
+}
+
+my @plugin_files;
+PD: foreach my $plugin (@ARGV) { 
+    print "Creating PAR file for plugin $plugin\n";
+    my $plugin_dir = "$FindBin::Bin/../plugin/$plugin";
+    die "$plugin_dir is not a directory!" unless -d $plugin_dir;
+    find(\&find_plugins, $plugin_dir);
+    my @plugincommand = @ppcommand;
+    push(@plugincommand, "-o", "$FindBin::Bin/dist/plugin/$plugin.sid");
+    foreach my $pf (@plugin_files) {
+        push(@plugincommand, "-c", $pf);    
+    }
+    _mkdir("$FindBin::Bin/dist/plugin");
+    _mkdir("$FindBin::Bin/dist/plugin/$plugin");
+    system(@plugincommand) == 0 or die "pp command failed: $?";
+    foreach my $file (@plugin_files) {
+        my ($name, $path) = fileparse($file);
+        _link("$FindBin::Bin/dist/plugin/$plugin.sid", "$FindBin::Bin/dist/plugin/$plugin/$name");
+    }
+    @plugin_files = ();
+}
+print "Finished!\n";
+
+sub _mkdir {
+    my $dir = shift;
+    unless (-d "$dir") {
+        mkdir ("$dir") or die "Cannot make $dir";
+    }
+}
+
+sub _link {
+    my $old = shift;
+    my $new = shift;
+    
+    unless (-l "$new") {
+        symlink ("$old", "$new") or die "Cannot make $new a symlink to $old!";
+    }
+}
+
+sub find_plugins {
+    my $file = $_;
+    if (-f $file) {
+	if ($file !~ /\./  && $file =~ /^\d/) {
+       	    push(@plugin_files, $File::Find::name);
+        }
+    }
+}
+
+sub find_dot_so {
+    my $filename = $_;
+    my %libs = (
+        'Name.so' => 1,
+        'Hostname.so' => 1,
+        'HiRes.so' => 1,
+        'Syck.so' => 1,
+        'Clone.so' => 1,
+        'UUID.so' => 1,
+    );
+    if (-f $filename && $filename =~ /\.so$/ && exists($libs{$filename})) {
+        push(@so_files, $filename);
+        push(@lib_dirs, $File::Find::dir);
+    }
+}

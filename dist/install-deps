@@ -1,0 +1,131 @@
+#
+# This is the Sid Dependency Installer.  It's purpose is to make it easier
+# and quicker to get a Sid Server (or Build system) up and running.
+#
+# Make sure you have perl 5.8.1+, a make and a compiler, a configured CPAN.pm
+# and Module::Build installed. Then run this script by executing:
+#
+# Run by using /path/to/perl install-deps
+#
+# It's cribbed pretty much entirely from the most excellent Shadowcat Catalyst
+# installer.  As such, it is covered under the GPL v2.  See
+# http://www.shadowcatsystems.co.uk/projects/catalyst/ for more information
+# on the Catalyst project and Shadowcat's involvement with it.  Rest
+# assured, though, that any bugs found here are mine, not Shadowcats.
+#
+# ORIGINAL COPYRIGHT:
+#
+# This software is Copyright (c) 2006 Shadowcat Systems Limited
+#                                     <mst@shadowcatsystems.co.uk>
+# 
+# LICENSE:
+#
+# This work is made available to you under the terms of Version 2 of
+# the GNU General Public License. A copy of this license can be obtained
+# from www.gnu.org, or by writing to the Free Software Foundation, Inc.,
+# 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+# This work is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+
+package CPAN::Override;
+
+$ENV{PERL_MM_USE_DEFAULT} = 1;
+
+my $orig = CPAN::Distribution->can('new');
+
+my $replace = sub {
+  my $dist = $orig->(@_);
+  my @bits = split('-', (split('/', $dist->normalize))[-1]);
+  pop(@bits);
+  my $o_pack = join('::', 'CPAN::Override::Distribution', @bits);
+  if ($o_pack->isa('CPAN::Distribution')) {
+    bless($dist, $o_pack);
+  }
+  return $dist;
+};
+
+{
+  no warnings 'redefine';
+  *CPAN::Distribution::new = \&$replace;
+}
+
+package CPAN::Override::Distribution::Template::Toolkit;
+
+use base qw/CPAN::Distribution/;
+
+use strict;
+use warnings;
+
+sub make {
+  my $self = shift;
+  my %args = (DOCS => 'n', SPLASH => 'n', EXAMPLES => 'n', EXTRAS => 'n',
+              DBI => 'n', LATEX => 'n', QUIET => 'n', ACCEPT => 'y');
+  my $extra_args = join(' ', map { "TT_$_=".$args{$_} } keys %args);
+  local $CPAN::Config->{makepl_arg} =
+    $CPAN::Config->{makepl_arg}.' '.$extra_args;
+  $self->SUPER::make(@_);
+}
+
+package CPAN::Override::Distribution::Module::Install;
+
+use base qw/CPAN::Distribution/;
+
+sub make {
+  my $self = shift;
+  $self->get;
+  my $builddir = $self->dir;
+  chdir($builddir) && (!-f 'Makefile') && do {
+    my $perl = $self->perl;
+    my $re_code = 's/^auto_install_now.*//; s/.*prerequisites_policy.*//;';
+    if ($^O eq 'MSWin32') {
+      $re_code .= ' s/^.*ExtUtils::ParseXS.*$//;';
+       system(qq!$perl -p -i.bak -e "s/\n/\r\n/;" Makefile.PL!);
+    }
+    system(qq!$perl -p -i.bak -e "${re_code}" Makefile.PL!);
+  };
+  return $self->SUPER::make(@_);
+}
+
+1;
+
+package main;
+
+use lib qw(.);
+use CPAN;
+
+CPAN::Config->load;
+
+install("Test::Exception");
+install("Data::Dump");
+install("DBM::Deep");
+install("Hash::Merge");
+install("HOP::Lexer");
+install("IO::Scalar");
+install("IPC::DirQueue");
+install("LWP::UserAgent");
+install("Module::Pluggable");
+install("Search::Xapian");
+install("URI");
+install("Data::Serializer");
+install("YAML::Syck");
+install("Storable");
+install("Data::UUID");
+install("Params::Validate");
+install("Config::General");
+install("File::Slurp");
+install("Log::Log4perl");
+install("Exception::Class");
+install("Exception::Class::TryCatch");
+install("Moose");
+install("Net::IPv4Addr");
+install("Daemon::Generic");
+install("PAR");
+install("Catalyst::Runtime");
+install("Catalyst::Plugin::ConfigLoader");
+install("Catalyst::Log::Log4perl");
+install("Catalyst::Action::RenderView");
+install("Catalyst::Action::REST");
+

@@ -1,0 +1,28 @@
+name: search
+method: get
+fields:
+    type:
+        label: Type
+    q:
+        label: Search
+        type: text
+        size: 40
+    f:
+        label: Result Fields
+        multiple: 1
+        size: 10
+    n:
+        label: Results per Page
+        type: select 
+        options: 10, 20, 30, 40, 50, 100, 1000
+        value: 10
+    p:
+        label: Page
+        options: 1
+        value: 1
+        type: hidden
+    display_as:
+        label: Display As
+        options: Table, Long
+        value: Long
+submit: Search

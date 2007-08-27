@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ("$FindBin::Bin/../../lib",);
+
+use Sid::Plugin::Script;
+
+use strict;
+use warnings;
+
+my %dispatch = (
+    'linux' => \&linux,
+);
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field(field => 'perlos');
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists($dispatch{$os});
+
+$dispatch{$os}($s, $entity);
+
+$s->update_entity(entity => $entity);
+
+$s->exit_zero;
+
+sub linux {
+    my $s = shift;
+    my $parent = shift;
+
+    my $cpu_file = "/proc/cpuinfo";
+    $s->exit_zero unless -f $cpu_file;
+
+    my %cpuinfo;
+    my $cpu_number = 0;
+    my %real_cpu;
+    my $current_cpu;
+    
+    open(CPUINFO, "<", "/proc/cpuinfo");
+    while (my $line = <CPUINFO>) {
+        chomp($line);
+        if ($line =~ /processor\s+:\s(.+)/) {
+            $cpuinfo{$1} = {};
+            $current_cpu = $1;
+            $cpu_number++;
+        } elsif ($line =~ /vendor_id\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'vendor-id'} = $1;
+        } elsif ($line =~ /cpu family\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'family'} = $1;
+        } elsif ($line =~ /model\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'model'} = $1;
+        } elsif ($line =~ /stepping\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'stepping'} = $1;
+        } elsif ($line =~ /physical id\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'physical-id'} = $1;
+            $real_cpu{$1} = 1;
+        } elsif ($line =~ /core id\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'core-id'} = $1;
+        } elsif ($line =~ /cpu cores\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'cores'} = $1;
+        } elsif ($line =~ /model name\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'model-name'} = $1;
+        } elsif ($line =~ /cpu MHz\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'mhz'} = $1;
+        } elsif ($line =~ /cache size\s+:\s(.+)/) { 
+            $cpuinfo{$current_cpu}->{'cache-size'} = $1;
+        } elsif ($line =~ /flags\s+:\s(.+)/) {
+            push(@{$cpuinfo{$current_cpu}->{'flags'}}, $_) for split(/ /, $1);
+        }
+    }
+    close(CPUINFO);
+    $parent->add_field(
+        field => 'cpu-total',
+        value => $cpu_number,
+    );
+    if (scalar(keys(%real_cpu))) {
+        $parent->add_field(
+            field => 'cpu-real',
+            value => scalar(keys(%real_cpu)),
+        );
+    }
+    $s->add_entity_from_hash(
+        type => 'cpu',
+        entities => \%cpuinfo,
+        parent => $parent,
+    );
+}

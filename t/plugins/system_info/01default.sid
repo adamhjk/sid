@@ -1,0 +1,39 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib "$FindBin::Bin/../../../lib";
+
+use Sid::Plugin::Script;
+
+use strict;
+use warnings;
+
+my $s = Sid::Plugin::Script->new;
+
+my $hostname = `hostname`;
+my $primary_id = $s->agent_id;
+
+my $entity = $s->new_entity(
+    type => 'machine',
+    primary_id => $primary_id,
+);
+$entity->add_tag(tag => 'monkey:robot');
+
+$entity->add_field(
+    field => 'hostname', 
+    value => $hostname
+);
+$entity->add_field(
+    field => 'domainname',
+    value => 'marchex.com',
+);
+$entity->add_field(
+    field => 'fqdn',
+    value => 'repugnus.marchex.com',
+    tags => [ qw(fully-qualified-domain-name) ],
+);
+
+$s->add_entity(entity => $entity);
+
+$s->output;
+exit 0;

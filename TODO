@@ -1,0 +1,5 @@
+1) Clean up the test suite; after so many refactors, most of it breaks.
+
+2) Build a view for text/html
+
+3) Write documentation

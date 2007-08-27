@@ -1,0 +1,147 @@
+#!/usr/bin/perl
+#
+# sid-schema
+# Created by: Adam Jacob, Marchex, <adam@marchex.com>
+# Created on: 09/23/2006 02:34:55 PM PDT
+#
+# $Id: sid,v 1.3 2006/10/11 00:23:15 adam Exp $
+
+use FindBin;
+use lib ( "$FindBin::Bin/../lib" );
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Log::Log4perl;
+use Pod::Usage;
+use Sid::Format;
+use Sid::Client;
+use Exception::Class::TryCatch;
+
+my $tmpdir = "$FindBin::Bin/../tmp";
+my $debuglevel = "ERROR";
+my $server;
+my $type;
+my $schema;
+my $output_filter = 'Tab';
+my @fields;
+
+my $man = 0;
+my $help = 0;
+GetOptions(
+    's|server=s' => \$server,
+    't|type=s' => \$type,
+    'a|all' => \$schema,
+    'L|debug=s' => \$debuglevel,
+    'help|?' => \$help,
+    'man' => \$man,
+);
+pod2usage(1) if $help;
+pod2usage(-exitstatus => 0, -verbose => 2) if $man;
+
+pod2usage(-exitstatus => 1, -msg => "You must supply -t or -a") unless (defined $type || defined $schema);
+
+$debuglevel = uc($debuglevel);
+
+my %logconf = ( 
+"log4perl.logger.rootLogger" => "$debuglevel, Stderr",
+"log4perl.logger.Sid.Format.Output" => "INFO, Stdout",
+"log4perl.appender.Stdout" => 'Log::Log4perl::Appender::Screen',
+"log4perl.appender.Stdout.layout" => 'Log::Log4perl::Layout::PatternLayout',
+"log4perl.appender.Stdout.stderr" => 0,
+"log4perl.appender.Stdout.layout.ConversionPattern" => '%m%n',
+"log4perl.appender.Stderr" => 'Log::Log4perl::Appender::Screen',
+"log4perl.appender.Stderr.layout" => 'Log::Log4perl::Layout::PatternLayout',
+"log4perl.appender.Stderr.stderr" => 1,
+"log4perl.appender.Stderr.layout.ConversionPattern" => '%m%n',
+);
+
+Log::Log4perl->init(\%logconf);
+
+my $client;
+if (defined($server)) {
+    pod2usage(-exitstatus => 1, -msg => "Server must be an http url") unless ($server =~ /^http/);
+    
+    $client = Sid::Client->new(server => $server);
+} else {
+    $client = Sid::Client->new;
+}
+
+my $response;
+my $logger = Log::Log4perl->get_logger("Sid.Format.Output");
+if (defined($type)) {
+    my $response = $client->get_schema_type(
+        type => $type,
+    );
+    unless (defined($response)) {
+        $logger->fatal("Cannot find schema for $type");
+        exit 5;
+    }
+    $logger->info("--- Search Fields ---");
+    foreach my $field (sort(keys(%{$response->{search_fields}}))) {
+        $logger->info("$field");
+    }
+    $logger->info("\n");
+    $logger->info("--- Result Fields ---");
+    foreach my $field (sort(keys(%{$response->{result_fields}}))) {
+        $logger->info("$field");
+    }
+} elsif (defined($schema)) {
+    my $response = $client->get_schema;
+    unless (defined($response)) {
+        $logger->fatal("Cannot find schema!");
+    }
+    $logger->info("--- Available Entity Types ---");
+    foreach my $type (sort(keys(%{$response}))) {
+        $logger->info($type);
+    }
+}
+
+exit 0;
+
+__END__
+
+=head1 NAME
+
+sid-schema - Display the current Entity Schema 
+
+=head1 SYNOPSIS
+
+sid-schema [options]
+
+  Options:
+   -s, -server         The Sid Service to Talk to (must be an URL.) 
+   -t, -type           The Entity Type to display.
+   -a, -schema         List the available entity types.
+   -L, -debug          A Log4Perl debug level. 
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-s or -server>
+
+This should be the base URL of a Sid Service.  Defaults to http://sid.
+
+=item B<-t or -type> (this or -a required)
+
+The type of entity to display the schema for.
+
+=item B<-a or -schema> (this or -t required)
+
+List all the available entity types.
+
+=item B<-L or -debug>
+
+Sets a Log4perl debug level.  If you set this to DEBUG, sid will get
+super chatty on STDOUT.  Defaults to ERROR.
+
+=back
+
+=head1 DESCRIPTION
+
+B<sid-schema> returns the currently available entity types, and a list
+of all the searchable and result fields.
+
+=cut

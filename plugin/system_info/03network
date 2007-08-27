@@ -1,0 +1,215 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ( "$FindBin::Bin/../../lib", );
+
+use Sid::Plugin::Script;
+use Net::IPv4Addr qw( ipv4_parse ipv4_network );
+
+use strict;
+use warnings;
+
+my %dispatch = ( 'linux' => \&linux, );
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type       => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field( field => 'perlos' );
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists( $dispatch{$os} );
+
+$dispatch{$os}( $s, $entity );
+
+$s->exit_zero;
+
+sub linux {
+    my $s      = shift;
+    my $parent = shift;
+
+    my $ifconfig = $s->run_command( command => "/sbin/ifconfig -a" );
+    my %iface;
+    my $cint;
+
+    # The net-tools ifconfig source is super handy here.  It's lib/interface.c
+    # and po/net-tools.pot are particularly useful.
+    foreach my $line ( split( /\n/, $ifconfig ) ) {
+        if ( $line =~ qr/^([[:alnum:]|\:|\-]+)/ ) {
+            $cint = $1;
+            $iface{$cint}->{'interface'} = $cint;
+        }
+        if (   $line =~ qr/Link encap:(Local Loopback)/
+            || $line =~ qr/Link encap:(.+?)\s/ ) {
+            $iface{$cint}->{'link-encap'} = $1;
+        }
+        if ( $line =~ qr/HWaddr (.+?)\s/ ) {
+            $iface{$cint}->{'mac-address'} = $1;
+        }
+
+        # Yeah, it's not a real IPv4 regex.  If ifconfig is reporting
+        # not-valid IPv4 addresses, you have way bigger problems than
+        # this regex. :)
+        if ( $line =~ qr/inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ ) {
+            $iface{$cint}->{'ip-address'} = $1;
+        }
+        if ( $line =~ qr/Bcast:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ ) {
+            $iface{$cint}->{'broadcast'} = $1;
+        }
+        if ( $line =~ qr/Mask:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ ) {
+            $iface{$cint}->{'netmask'} = $1;
+            if ( exists( $iface{$cint}->{'ip-address'} ) ) {
+                my $cidr = ipv4_parse(
+                    $iface{$cint}->{'ip-address'},
+                    $iface{$cint}->{'netmask'}
+                );
+                $iface{$cint}->{'cidr'} = $cidr;
+                my $network = ipv4_network($cidr);
+                $iface{$cint}->{'network'} = $network;
+            }
+        }
+        my @flags =
+          $line =~
+/(UP|BROADCAST|DEBUG|LOOPBACK|POINTTOPOINT|NOTRAILERS|RUNNING|NOARP|PROMISC|ALLMULTI|SLAVE|MASTER|MULTICAST|DYNAMIC)\s/g;
+        if ( scalar(@flags) ) {
+            push( @{ $iface{$cint}->{'flag'} }, @flags );
+        }
+        if ( $line =~ qr/MTU:(\d+)/ ) {
+            $iface{$cint}->{'mtu'} = $1;
+        }
+        if ( $line =~ qr/Metric:(\d+)/ ) {
+            $iface{$cint}->{'metric'} = $1;
+        }
+        if ( $line =~
+qr/RX packets:(\d+) errors:(\d+) dropped:(\d+) overruns:(\d+) frame:(\d+)/
+          ) {
+            $iface{$cint}->{'rx-packets'}  = $1;
+            $iface{$cint}->{'rx-errors'}   = $2;
+            $iface{$cint}->{'rx-dropped'}  = $3;
+            $iface{$cint}->{'rx-overruns'} = $4;
+            $iface{$cint}->{'rx-frame'}    = $5;
+        }
+        if ( $line =~
+qr/TX packets:(\d+) errors:(\d+) dropped:(\d+) overruns:(\d+) carrier:(\d+)/
+          ) {
+            $iface{$cint}->{'tx-packets'}  = $1;
+            $iface{$cint}->{'tx-errors'}   = $2;
+            $iface{$cint}->{'tx-dropped'}  = $3;
+            $iface{$cint}->{'tx-overruns'} = $4;
+            $iface{$cint}->{'tx-carrier'}  = $5;
+        }
+        if ( $line =~ qr/collisions:(\d+)/ ) {
+            $iface{$cint}->{'collisions'} = $1;
+        }
+        if ( $line =~ qr/txqueuelen:(\d+)/ ) {
+            $iface{$cint}->{'txqueuelen'} = $1;
+        }
+        if ( $line =~ qr/RX bytes:(\d+) \((\d+?\.\d+ .+?)\)/ ) {
+            $iface{$cint}->{'rx-bytes'}       = $1;
+            $iface{$cint}->{'rx-bytes-human'} = $2;
+        }
+        if ( $line =~ qr/TX bytes:(\d+) \((\d+?\.\d+ .+?)\)/ ) {
+            $iface{$cint}->{'tx-bytes'}       = $1;
+            $iface{$cint}->{'tx-bytes-human'} = $2;
+        }
+    }
+    foreach my $if ( keys(%iface) ) {
+        my $int_entity = $s->new_entity(
+            type       => "network-interface",
+            primary_id => "$if",
+        );
+        $int_entity->set_parent( entity => $parent );
+
+        foreach my $field ( keys( %{ $iface{$if} } ) ) {
+            if ( ref( $iface{$if}->{$field} ) eq "ARRAY" ) {
+                $int_entity->add_field(
+                    field => $field,
+                    value => $_,
+                ) foreach ( @{ $iface{$if}->{$field} } );
+            } else {
+                $int_entity->add_field(
+                    field => $field,
+                    value => $iface{$if}->{$field},
+                );
+            }
+        }
+
+        my $kernel_release = $entity->find_field( field => 'kernel-release' );
+        my ( $version, $revision, $minor, $bugfix ) =
+          split( /\./, $kernel_release );
+        if ( $version == 2 && $revision == 6 ) {
+            my @pciids =
+              ( "/usr/share/misc/pci.ids", "/usr/share/hwdata/pci.ids" );
+            my $pcifile;
+          PCIF: foreach my $file (@pciids) {
+                if ( -f $file ) {
+                    $pcifile = $file;
+                    last PCIF;
+                }
+            }
+            if ($pcifile) {
+                if ( -f "/sys/class/net/$if/device/vendor" ) {
+                    my $vendor = $s->cat_file(
+                        file     => "/sys/class/net/$if/device/vendor",
+                        do_chomp => 1
+                    );
+                    my $device = $s->cat_file(
+                        file     => "/sys/class/net/$if/device/device",
+                        do_chomp => 1
+                    );
+                    my $subvendor = $s->cat_file(
+                        file => "/sys/class/net/$if/device/subsystem_vendor",
+                        do_chomp => 1
+                    );
+                    my $subdevice = $s->cat_file(
+                        file => "/sys/class/net/$if/device/subsystem_device",
+                        do_chomp => 1
+                    );
+                    if ( defined($vendor) ) {
+                        open( PCI, "<", $pcifile )
+                          or die "Cannot open $pcifile";
+                        my $device_name = "Unknown";
+                        while ( my $line = <PCI> ) {
+                            if ( $line =~ /^(.{4})\s{2}(.+)/ ) {
+                                my $cvendor      = $1;
+                                my $cvendor_name = $2;
+                                if ( "0x$cvendor" eq $vendor ) {
+                                    $device_name = $cvendor_name;
+                                }
+                            } elsif ( defined($device)
+                                && $line =~ /^\t(.{4})\s{2}(.+)/ ) {
+                                my $cdevice      = $1;
+                                my $cdevice_name = $2;
+                                if ( "0x$cdevice" eq $device ) {
+                                    $device_name .= " $cdevice_name";
+                                }
+                            } elsif ( defined($subvendor)
+                                && defined($subdevice)
+                                && $line =~ /^\t\t(.{4})\s(.{4})\s{2}(.+)/ ) {
+                                my $csubvendor      = $1;
+                                my $csubdevice      = $2;
+                                my $csubsystem_name = $3;
+                                if (   "0x$csubvendor" eq $subvendor
+                                    && "0x$csubdevice" eq $subdevice ) {
+                                    $device_name .= " $csubsystem_name";
+                                }
+                            }
+                        }
+                        close(PCI);
+                        $int_entity->add_field(
+                            field => 'device-name',
+                            value => $device_name,
+                        );
+                    }
+                }
+            }
+        }
+        $s->add_entity( entity => $int_entity );
+    }
+}
+

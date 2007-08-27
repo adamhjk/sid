@@ -1,0 +1,108 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ( "$FindBin::Bin/../../lib", );
+
+use Sid::Plugin::Script;
+use Data::Dump qw(dump);
+
+use strict;
+use warnings;
+
+my %dispatch = ( 'linux' => \&linux, );
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type       => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field( field => 'perlos' );
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists( $dispatch{$os} );
+
+$dispatch{$os}( $s, $entity );
+
+$s->exit_zero;
+
+sub linux {
+    my $s      = shift;
+    my $parent = shift;
+
+    my $dfout = $s->run_command( command => "/bin/df -P" );
+
+    my %fs;
+    
+    DFLINE: foreach my $line ( split( /\n/, $dfout ) ) {
+        chomp($line);
+        if ($line =~ qr/^Filesystem\s+1024-blocks/) {
+            next DFLINE;
+        }
+        if ($line =~ qr/^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+\%)\s+(.+)$/) {
+            my $filesystem = $1;
+            $fs{$filesystem}->{'filesystem'} = $1;
+            $fs{$filesystem}->{'kb-size'} = $2;
+            $fs{$filesystem}->{'kb-used'} = $3;
+            $fs{$filesystem}->{'kb-available'} = $4;
+            $fs{$filesystem}->{'percent-used'} = $5;
+            $fs{$filesystem}->{'mount'} = $6;
+        }
+    }
+
+    my $mountout = $s->run_command( command => "/bin/mount -l" );
+
+    MLINE: foreach my $line ( split( /\n/, $mountout ) ) {
+        chomp($line);
+        if ($line =~ qr/^(.+?) on (.+?) type (.+?) \((.+?)\)$/) {
+            my $filesystem = $1;
+            $fs{$filesystem}->{'filesystem'} = $1;
+            $fs{$filesystem}->{'mount'} = $2;
+            $fs{$filesystem}->{'fs-type'} = $3;
+            my @options = split(/,/, $4);
+            $fs{$filesystem}->{'mount-options'} = \@options; 
+        }
+    }
+
+    $s->add_entity_from_hash(
+        type => 'filesystem',
+        entities => \%fs,
+        parent => $parent,
+    );
+
+    my %block;
+    if (-d "/sys/block") {
+        opendir(BLOCK, "/sys/block");
+        BDEV: while (my $dir = readdir(BLOCK)) {
+            next BDEV if ($dir =~ /^\./);
+            $block{$dir}->{'device'} = $dir;
+            my @blockfiles = qw(size removable);
+            foreach my $file (@blockfiles) {
+                my $contents = $s->cat_file(
+                    file => "/sys/block/$dir/$file",
+                    do_chomp => 1,
+                );
+                $block{$dir}->{$file} = $contents if defined $contents;
+            }
+            my @devicefiles = qw(model rev state timeout vendor);
+            foreach my $file (@devicefiles) {
+                my $contents = $s->cat_file(
+                    file => "/sys/block/$dir/device/$file",
+                    do_chomp => 1,
+                );
+                $block{$dir}->{$file} = $contents if defined $contents;
+            }
+        }
+        closedir(BLOCK);
+    }
+
+    $s->add_entity_from_hash(
+        type => 'block-device',
+        entities => \%block,
+        parent => $parent,
+    );
+}
+

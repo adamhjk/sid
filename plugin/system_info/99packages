@@ -1,0 +1,174 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ("$FindBin::Bin/../../lib",);
+
+use Sid::Plugin::Script;
+use Data::Dump qw(dump);
+use strict;
+use warnings;
+
+my %dispatch = (
+    'linux' => \&linux,
+	'darwin' => \&darwin,
+);
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field(field => 'perlos');
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists($dispatch{$os});
+
+$dispatch{$os}($s, $entity);
+
+$s->exit_zero;
+
+sub linux {
+    my $s = shift;
+    my $entity = shift;
+
+    my $os = $entity->find_field(field => 'os');
+    if ($os eq "Debian GNU/Linux") {
+        dpkg_packages($s, $entity);
+    } elsif ($os eq "Ubuntu") {
+        dpkg_packages($s, $entity);
+    }
+}
+
+sub darwin {
+	my $s = shift;
+	my $entity = shift;
+	
+	open(PACKAGES, "-|", "/usr/sbin/system_profiler SPApplicationsDataType");
+	my $current_application;
+	my %app_info;
+	while (my $line = <PACKAGES>) {
+		if ($line =~ /\s{4}(.+):$/) {
+		    $current_application = $1;
+			%app_info = (
+				package => $current_application,
+				"package-from" => "Mac OS X",
+			);
+		} elsif ($line =~ /\s{6}(.+): (.+)$/) {
+			my $field = $1;
+			my $value = $2;
+			if ($field eq "Version") {
+				$app_info{'version'} = $value;
+			} elsif ($field eq "Last Modified") {
+				$app_info{'last-modified'} = $value;
+			} elsif ($field eq "Kind") {
+				$app_info{'binary-kind'} = $value;
+		    } elsif ($field eq "Get Info String") {
+		        $app_info{'get-info-string'} = $value;
+		    } elsif ($field eq "Location") {
+		        $app_info{'location'} = $value;
+		        if ($current_application) {
+        			my $new_entity = $s->new_entity(
+        				type => 'os-package',
+        				primary_id => $current_application
+        			);
+        			$new_entity->set_parent(entity => $entity);
+        			foreach my $field (keys(%app_info)) {
+        				$new_entity->add_field(
+        					field => $field,
+        					value => $app_info{$field}
+        				);
+        			}
+        			$s->add_entity(entity => $new_entity);
+    		    }
+		    }
+		}
+	}
+	close(PACKAGES);
+	if (-f "/sw/var/lib/dpkg/status") {
+	    dpkg_packages($s, $entity, "/sw/var/lib/dpkg/status", "fink");
+	}
+}
+
+sub dpkg_packages {
+    my $s = shift;
+    my $parent = shift;
+	my $dpkg_status = shift || "/var/lib/dpkg/status";
+	my $pkg_from = shift || "dpkg";
+
+    $s->exit_zero unless -f $dpkg_status;
+
+    open(STATUS, "<", $dpkg_status);
+    my $current_package;
+    my $installed = 0;
+    my %cp_info;
+    while (my $line = <STATUS>) {
+        chomp($line);
+        if ($line =~ qr/^Package: (.+)/) {
+            my $package = $1;
+            if (defined($current_package) && $installed) {
+                my $new_entity = $s->new_entity(
+                    type => 'os-package',
+                    primary_id => $current_package,
+                );
+                $new_entity->set_parent(entity => $parent);
+                $new_entity->add_field(
+                    field => 'package',
+                    value => $current_package,
+                );
+                $new_entity->add_field(
+                    field => 'package-from',
+                    value => $pkg_from,
+                );
+                foreach my $key (keys(%cp_info)) {
+                    if (ref($cp_info{$key}) eq "ARRAY") {
+                        foreach my $value (@{$cp_info{$key}}) {
+                            $new_entity->add_field(
+                                field => $key,
+                                value => $value,
+                            );
+                        }
+                    } else {
+                        $new_entity->add_field(
+                            field => $key,
+                            value => $cp_info{$key},
+                        );
+                    }
+                }
+                $s->add_entity(entity => $new_entity);
+            }
+            $current_package = $package;
+            $installed = 0;
+            %cp_info = ();
+        } elsif ($line =~ qr/^Status: install ok installed/) {
+            $installed = 1;
+        } elsif (defined($current_package) && $installed) {
+            if ($line =~ qr/^Priority: (.+)/) {
+                $cp_info{priority} = $1;
+            } elsif ($line =~ qr/^Section: (.+)/) {
+                $cp_info{section} = $1;
+            } elsif ($line =~ qr/^Installed-Size: (.+)/) {
+                $cp_info{'installed-size'} = $1;
+            } elsif ($line =~ qr/^Maintainer: (.+)/) {
+                $cp_info{'maintainer'} = $1;
+            } elsif ($line =~ qr/^Architecture: (.+)/) {
+                $cp_info{'architecture'} = $1;
+            } elsif ($line =~ qr/^Version: (.+)/) {
+                $cp_info{version} = $1;
+            } elsif ($line =~ qr/^Description: (.+)/) {
+                $cp_info{description} = $1;
+            } elsif ($line =~ qr/^Depends: (.+)/) {
+                $cp_info{depends} = [ split(/, /, $1) ];
+            } elsif ($line =~ qr/^Replaces: (.+)/) {
+                $cp_info{replaces} = [ split(/, /, $1) ];
+            }
+        }
+    }
+    close(STATUS);
+    return 1;
+}
+
+

@@ -1,0 +1,10 @@
+<ul>
+[% FOREACH type = types %]
+<li> [% type %] </li>
+<ul>
+[% FOREACH entity = types.${type} %]
+<li>[% entity.primary_id %]</li>
+[% END %]
+</ul>
+[% END %]
+</ul>

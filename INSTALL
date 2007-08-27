@@ -1,0 +1,19 @@
+Installing Sid can be a bit of a chore still.  The first step is getting
+all of the required perl modules installed.  To get a sid server running:
+
+0. Make sure you have a configured CPAN module.  Running:
+
+    sudo perl -MCPAN -e shell
+  
+  Should do the trick.
+  
+0.1. Make sure you have Xapian installed.  You can find this at:
+    
+    http://www.xapian.org/download.php
+  
+1. Run "sudo perl dist/install-deps".  This will install all the required
+  perl modules for you.  You may have to run this several times to ensure
+  that everything installs cleanly.  When it outputs nothing other than
+  "Packaged::Foo is up to date", you are ready to move on.
+
+

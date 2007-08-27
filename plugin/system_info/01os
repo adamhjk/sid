@@ -1,0 +1,177 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ("$FindBin::Bin/../../lib",);
+
+use strict;
+use warnings;
+
+use Sid::Plugin::Script;
+
+my %dispatch_os = (
+    linux => \&linux,
+	darwin => \&darwin,
+);
+
+my $s = Sid::Plugin::Script->new;
+
+$s->exit_zero unless exists($dispatch_os{$^O});
+
+my $entity = $s->new_entity(
+    type => 'system',
+    primary_id => $s->agent_id,
+);
+
+$entity->add_field(
+    field => 'perlos',
+    value => $^O,
+);
+
+$dispatch_os{$^O}($s, $entity);
+$s->add_entity(entity => $entity);
+
+$s->exit_zero;
+
+sub linux {
+    my $s = shift;
+    my $entity = shift;
+
+	$entity = get_from_posix_uname($s, $entity);
+
+    if (-f "/etc/lsb-release") {
+        my $lsb_release = $s->run_command(
+            command => "cat /etc/lsb-release",
+        );
+        foreach my $line (split(/\n/, $lsb_release)) {
+            if ($line =~ /^DISTRIB_ID=(.+)$/) {
+                $entity->add_field(
+                    field => 'os',
+                    value => $1,
+                );
+            } elsif ($line =~ /^DISTRIB_RELEASE=(.+)$/) {
+                $entity->add_field(
+                    field => 'os-version',
+                    value => $1,
+                );
+            } elsif ($line =~ /^DISTRIB_CODENAME=(.+)$/) {
+                $entity->add_field(
+                    field => 'os-codename',
+                    value => $1,
+                );
+            } elsif ($line =~ /^DISTRIB_DESCRIPTION="{0,1}(.+?)"{0,1}$/) {
+                $entity->add_field(
+                    field => 'os-description',
+                    value => $1,
+                );
+            }
+        }
+    } elsif (-f "/etc/debian_version") {
+        $entity->add_field(
+            field => 'os',
+            value => 'Debian GNU/Linux',
+        ); 
+        $entity->add_field_from_exec(
+            field => 'os-version',
+            command => "cat /etc/debian_version",
+            do_chomp => 1,
+        );
+    } elsif (-f "/etc/redhat-release") {
+        my $redhat_release = $s->run_command(
+            command => "cat /etc/redhat_release",
+            do_chomp => 1,
+        );
+        my ($redhat_os, $redhat_version) = $redhat_release =~ /^(.+) ([[:upper:]]{2}.+)$/;
+        $entity->add_field(
+            field => 'os',
+            value => $redhat_os,
+        ); 
+        $entity->add_field(
+            field => 'os-version',
+            value => $redhat_version,
+        ); 
+    }
+    return $entity;
+}
+
+sub darwin {
+	my $s = shift;
+	my $entity = shift;
+	
+	$entity = get_from_posix_uname($s, $entity);
+	my $full_version = $s->run_command(command => 'sw_vers');
+	foreach my $line (split("\n", $full_version)) {
+		if ($line =~ /^ProductName:\s+(.+)$/) {
+			$entity->add_field(
+				field => 'os',
+				value => $1,
+			);	
+		} elsif ($line =~ /^ProductVersion:\s+(.+)$/) {
+			$entity->add_field(
+				field => 'os-version',
+				value => $1,
+			);
+		} elsif ($line =~ /^BuildVersion:\s+(.+)$/) {
+			$entity->add_field(
+				field => 'os-build-version',
+				value => $1
+			);
+		}
+	}
+	
+	return $entity;
+}
+
+sub get_from_posix_uname {
+	my $s = shift;
+	my $entity = shift;
+	
+	my $uname = chomp_and_return("which uname");
+    die "Cannot find uname!" unless defined $uname;
+
+    $entity->add_field_from_exec(
+        field => 'kernel-name',
+        command => "$uname -s",
+        do_chomp => 1,
+    );
+    $entity->add_field_from_exec(
+        field => 'kernel-release',
+        command => "$uname -r",
+        do_chomp => 1,
+    );
+    $entity->add_field_from_exec(
+        field => 'kernel-version',
+        command => "$uname -v",
+        do_chomp => 1,
+    ); 
+    $entity->add_field_from_exec(
+        field => 'machine',
+        command => "$uname -m",
+        do_chomp => 1,
+    );
+    my $opts = `uname --help`;
+    if ($opts =~ /\-o/) {
+        $entity->add_field_from_exec(
+            field => 'kernel-os',
+            command => "$uname -o",
+            do_chomp => 1,
+        );
+    } else {
+        $entity->add_field_from_exec(
+            field => 'kernel-os',
+            command => "$uname -s",
+            do_chomp => 1,
+        );
+    }
+	
+	return $entity;
+}
+
+sub chomp_and_return {
+    my $command = shift;
+    
+    my $result = `$command`;
+    chomp($result);
+    return $result;
+}
+

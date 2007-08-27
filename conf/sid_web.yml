@@ -1,0 +1,8 @@
+---
+name: Sid::Web
+Model::Sid:
+    server: http://localhost:3000
+
+static:
+    dirs:
+        - __path_to('root/static')__

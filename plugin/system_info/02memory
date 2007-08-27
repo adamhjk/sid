@@ -1,0 +1,65 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ("$FindBin::Bin/../../lib",);
+
+use Sid::Plugin::Script;
+
+use strict;
+use warnings;
+
+my %dispatch = (
+    'linux' => \&linux,
+);
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field(field => 'perlos');
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists($dispatch{$os});
+
+$entity = $dispatch{$os}($s, $entity);
+
+$s->update_entity(entity => $entity);
+
+$s->exit_zero;
+
+sub linux {
+    my $s = shift;
+    my $entity = shift;
+
+    my $meminfo = $s->run_command(command => 'cat /proc/meminfo');
+    foreach my $line (split(/\n/, $meminfo)) {
+        if ($line =~ /^MemTotal:\s+(\d+) (.+)$/) {
+            $entity->add_field(
+                field => 'memorytotal',
+                value => $1 . $2,
+            );
+        } elsif ($line =~ /^MemFree:\s+(\d+) (.+)$/) {
+            $entity->add_field(
+                field => 'memoryfree',
+                value => $1 . $2,
+            );
+        } elsif ($line =~ /^SwapTotal:\s+(\d+) (.+)$/) {
+            $entity->add_field(
+                field => 'swaptotal',
+                value => $1 . $2,
+            );
+        } elsif ($line =~ /^SwapFree:\s+(\d+) (.+)$/) {
+            $entity->add_field(
+                field => 'swapfree',
+                value => $1 . $2,
+            );
+        }
+    }
+    return $entity;
+}
+

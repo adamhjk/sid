@@ -1,0 +1,43 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib "$FindBin::Bin/../../../lib";
+
+use Sid::Plugin::Script;
+
+use strict;
+use warnings;
+
+my $s = Sid::Plugin::Script->new;
+
+my $primary_id = $s->agent_id;
+
+my $parent = $s->find_entity(
+    type => 'machine',
+    primary_id => $primary_id,
+);
+
+my $entity = $s->new_entity(
+    type => 'kitty',
+    primary_id => 'lou lou',
+);
+
+$entity->set_parent(entity => $parent);
+
+$entity->add_tag(tag => 'my:cat!');
+
+$entity->add_field(
+    field => 'owner', 
+    value => 'Adam Jacob',
+);
+
+$entity->add_field(
+    field => 'owner', 
+    value => 'Katie Bethell',
+);
+
+$s->add_entity(entity => $entity);
+
+$s->output;
+
+exit 0;

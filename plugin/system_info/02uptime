@@ -1,0 +1,88 @@
+#!/usr/bin/perl
+
+use FindBin;
+
+use lib ( "$FindBin::Bin/../../lib", );
+
+use Sid::Plugin::Script;
+
+use strict;
+use warnings;
+
+my %dispatch = ( 'linux' => \&linux, );
+
+my $s = Sid::Plugin::Script->new;
+
+my $entity = $s->find_entity(
+    type       => 'system',
+    primary_id => $s->agent_id,
+);
+die "No entity!" unless defined $entity;
+
+my $os = $entity->find_field( field => 'perlos' );
+die "No OS!" unless defined $os;
+
+$s->exit_zero unless exists( $dispatch{$os} );
+
+$entity = $dispatch{$os}( $s, $entity );
+
+$s->update_entity( entity => $entity );
+
+$s->exit_zero;
+
+sub linux {
+    my $s      = shift;
+    my $entity = shift;
+
+    my $proc_uptime = $s->run_command( command => "cat /proc/uptime", );
+    chomp($proc_uptime);
+    my ( $uptime, $idletime ) = split(/ /, $proc_uptime );
+    $entity->add_field(
+        field => 'uptime-seconds',
+        value => $uptime,
+    );
+    $entity->add_field(
+        field => 'uptime',
+        value => _convert_seconds($uptime),
+    );
+    $entity->add_field(
+        field => 'idletime-seconds',
+        value => $idletime,
+    );
+    $entity->add_field(
+        field => 'idletime',
+        value => _convert_seconds($idletime),
+    );
+    return $entity;
+}
+
+# Thanks to John Simpson for the algorithm; boy, I'm bad at math.
+# And that was ludicrously simple.
+# http://qmail.jms1.net/scripts/ss - sub hms
+sub _convert_seconds {
+    my $seconds = shift;
+    my ( $days, $hours, $minutes );
+
+    $days = int( $seconds / 86400 );
+    $seconds -= 86400 * $days;
+
+    $hours = int( $seconds / 3600 );
+    $seconds -= 3600 * $hours;
+
+    $minutes = int( $seconds / 60 );
+    $seconds -= 60 * $minutes;
+
+    if ( $days > 1 ) {
+        return sprintf( "%d days %02d hours %02d minutes %02d seconds",
+            $days, $hours, $minutes, $seconds );
+    }
+    if ( $days > 0 ) {
+        return sprintf( "%d day %02d hours %02d minutes %02d seconds",
+            $days, $hours, $minutes, $seconds );
+    } elsif ( $hours > 0 ) {
+        return sprintf( "%d hours %02d minutes %02d seconds", $hours, $minutes, $seconds );
+    } else {
+        return sprintf( "%d minutes %02d seconds", $minutes, $seconds );
+    }
+}
+

@@ -1,0 +1,216 @@
+<div class="search_box">
+<div class="search_form">
+    [% form.render %]
+</div>
+<script type="text/javascript">
+<!--
+function update_from_type(schematype) {
+    if (schematype == "-select-") {
+        var search_fields_output = "";
+        [%- FOR field IN search_fields -%]
+            search_fields_output = search_fields_output + '<span class="sfield">[% field | replace("'", '\\\'') %]</span><br/>';
+        [%- END -%]
+        dojo.byId("search_fields").innerHTML = search_fields_output;
+        var field_obj = dojo.byId('f');
+        for (var i = field_obj.length - 1; i >= 0; i--) {
+            field_obj.remove(i);
+        } 
+        var option;
+        [%- FOR result IN result_fields -%]
+            option = new Option;
+            option.text = '[% result %]';
+            option.value = '[% result %]';
+            field_obj.add(option, null);
+        [%- END -%]
+    } else {
+        var myurl = "[% Catalyst.uri_for('/rest/schema').as_string %]/" + schematype;
+        dojo.io.bind({
+            url: myurl + "?content-type=text/x-json",
+            //mimetype: 'text/json',
+            load: function(type, data, e) {
+                var schemaObject = eval('(' + data + ')');
+                dojo.debugShallow(schemaObject);
+                var search_fields_output = "";
+                var props = [];
+                var search_fields = schemaObject.search_fields;
+                for (var prop in search_fields) {
+                    props.push(prop);
+                } 
+                var sprops = props.sort();
+                for(var i = 0; i < sprops.length; i++) {
+                    search_fields_output = search_fields_output + '<span class="sfield">' + sprops[i] + '</span><br/>'; 
+                }
+                dojo.byId("search_fields").innerHTML = search_fields_output; 
+
+                var result_fields = schemaObject.result_fields;
+                var result_props = [];
+                for (var result in result_fields) {
+                    result_props.push(result);
+                }
+                var sresult_props = result_props.sort();
+                var field_obj = dojo.byId('f');
+                for (var i = field_obj.length - 1; i >= 0; i--) {
+                    field_obj.remove(i);
+                }
+                for(var i = 0; i < sresult_props.length; i++) {
+                    var option = new Option;
+                    option.text = sresult_props[i];
+                    option.value = sresult_props[i];
+                    field_obj.add(option, null);
+                } 
+           }
+        });
+    }
+}
+dojo.event.connect(dojo.byId('type'), "onchange",
+function(e) { update_from_type(dojo.byId('type').options[dojo.byId('type').selectedIndex].text); });
+
+     -->
+ </script>
+ <div class="search_field_box">
+<div class="search_field_header">
+     Available Search Fields
+</div>
+<div id="search_fields" class="search_fields">
+    [% FOREACH field IN search_fields %]
+    <span class="sfield">[% field %]</span><br/>
+    [% END %]
+</div>
+</div>
+</div>
+[% IF search_pager %]
+<div class="search_statistics">
+    Results <b>[% search_pager.first %] - [% search_pager.last %]</b> of <b>[% search_pager.total  %]</b>
+</div>
+[% END %]
+<div class="search_results">
+    [% IF Catalyst.req.param('display_as') == 'Long' %] 
+    [% FOREACH entity = search_results %]
+    <table class="entity">
+        <thead class="entity_header">
+            <tr class="entity_seperator">
+                <th>Entity:</th><td><a href="[% 
+                        Catalyst.uri_for('/entity', {
+                            'primary_id' => entity.primary_id,
+                            'type' => entity.type,
+                            'agent_id' => entity.agent_id,
+                            'plugin_id' => entity.plugin_id,
+                            },
+                            ) %]">[% entity.type %] [% entity.primary_id %]</a><br/>
+                        from Agent <a href="[%
+                            Catalyst.uri_for('/entity', {
+                            'agent_id' => entity.agent_id 
+                            }) %]">[% entity.agent_id %]</a>
+                        Plugin <a href="[%
+                            Catalyst.uri_for('/entity', {
+                            'agent_id' => entity.agent_id,
+                            'plugin_id' => entity.plugin_id,
+                            }) %]">[% entity.plugin_id %]</a>
+                        
+                        </td>
+            </tr>
+        </thead>
+        <tbody>
+            [% even = 1 %]
+            [% FOREACH field = entity.fields.keys.sort %]
+            [% IF even %]
+            <tr>
+            [% even = 0 %]
+            [% ELSE %]
+            <tr class="odd">
+                [% even = 1 %]
+            [% END %]
+                <th>[% field %]:</th>
+                <td>
+                    [% FOREACH value IN entity.fields.$field.sort %]
+                    [% value %]<br/>
+                    [% END %]
+                </td>
+            [% END %]
+        </tbody>
+    </table>
+    [% END %]
+    [% ELSE %]
+    [% IF Catalyst.req.param('f') %]
+    <table>
+        <thead>
+            <tr>
+                [% FOREACH field = Catalyst.req.param('f').sort %] 
+                <th>[% field %]</th>
+                [% END %]
+            </tr>
+        </thead>
+        <tbody>
+            [% even = 1 %]
+            [% FOREACH entity = search_results %]
+            [% IF even %]
+            <tr>
+            [% even = 0 %]
+            [% ELSE %]
+            <tr class="odd">
+            [% even = 1 %]
+            [% END %]
+                [% FOREACH field = Catalyst.req.param('f').sort %]
+                <td>[% FOREACH value IN entity.fields.$field %][% value %]<br/>[% END %]</td>
+                [% END %]
+            </tr>
+            [% END %]
+        </tbody>
+    </table>
+    [% ELSE %]
+        Sorry, I can only generate a Table if you specify the result fields.
+    [% END %]
+    [% END %]
+</div>
+[% IF search_pager %]
+
+[% pager_form_start = BLOCK %]
+    <form action="[% Catalyst.req.uri %]" method="get">
+        <input type="hidden" name="q" value="[% Catalyst.req.param('q') FILTER html %]">
+        <input type="hidden" name="n" value="[% Catalyst.req.param('n') FILTER html %]">
+        <input type="hidden" name="type" value="[% Catalyst.req.param('type') FILTER html %]">
+        <input type="hidden" name="display_as" value="[% Catalyst.req.param('display_as') FILTER html %]">
+        [% FOREACH field IN Catalyst.req.param('f') %]
+        <input type="hidden" name="f" value="[% field FILTER html %]">
+        [% END %]
+[% END %]
+
+<div class="search_pager">
+    <div class="page_form">
+    [% pager_form_start %]
+    <input type="hidden" name="p" value="[% search_pager.next_page %]">
+    [% IF search_pager.previous_page %]
+    <input type="submit" name="do_page" value="Previous Page">
+    [% ELSE %]
+    <input type="submit" name="do_page" value="Previous Page" disabled>
+    [% END %]
+    </form>
+    </div>
+    <div class="page_form">
+    [% pager_form_start %]
+        Page: <select name="p">
+            [% FOREACH page_num = page_list %]
+            [% IF page_num == search_pager.current_page %]
+            <option value="[% page_num %]" selected>[% page_num %]</option>
+            [% ELSE %]
+            <option value="[% page_num %]">[% page_num %]</option>
+            [% END %]
+            [% END %]
+        </select>
+        of [% search_pager.last_page %]
+        <input type="submit" name="do_page" value="Go To Page">
+    </form>
+    </div>
+    <div class="page_form">
+    [% pager_form_start %]
+    <input type="hidden" name="p" value="[% search_pager.next_page %]">
+    [% IF search_pager.next_page %]
+    <input type="submit" name="do_page" value="Next Page">
+    [% ELSE %]
+    <input type="submit" name="do_page" value="Next Page" disabled>
+    [% END %]
+    </form>
+    </div>
+
+</div>
+[% END %]
