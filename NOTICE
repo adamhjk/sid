@@ -1,0 +1,14 @@
+===========================================
+Sid, a system information detection service
+===========================================
+
+Sid was created while Adam Jacob <adam@opscode.com> was working at Marchex.
+
+Marchex politely gave me permission to open source it.  Thanks, Marchex.
+
+Contributors and Copyright holders:
+
+ * Copyright 2008, Adam Jacob <adam@opscode.com>
+ * Copyright 2008, Marchex Inc.
+
+
